@@ -7,7 +7,6 @@ import pws.editor.semantics.Semantics;
 import smalgebra.BasicStateProposition;
 
 import java.util.*;
-
 public class Assembly implements AssemblyInterface {
     private String assemblyId;
     private Map<String, StateMachine> stateMachines;
@@ -206,7 +205,10 @@ public class Assembly implements AssemblyInterface {
             StateMachine machine = entry.getValue();
             List<String> stateNames = new ArrayList<>();
             for (StateInterface s : machine.getStates()) {
-                stateNames.add(s.getName());
+                String stateName = s.getName();
+                if ( !stateName.equals("PseudoState") ) {
+                    stateNames.add(stateName);
+                }
             }
             machineStates.put(machineId, stateNames);
         }

@@ -6,6 +6,7 @@ import machinery.State;
 import machinery.StateInterface;
 import machinery.StateMachine;
 import machinery.TransitionInterface;
+import pws.PWSState;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -60,6 +61,10 @@ public class AssemblyGenerator {
         StateMachine machine = template.getStateMachines().get(machineId);
         // For each possible state in the state machine, assign it and recurse.
         for (StateInterface state : machine.getStates()) {
+            // Skip assigning the pseudostate as a machine’s “current” state
+            if (state instanceof PWSState && ((PWSState) state).isPseudoState()) {
+                continue;
+            }
             assignment.put(machineId, (State) state);
             generateAssembliesRecursive(template, machineIds, index + 1, assignment, result);
             // Remove the assignment before the next iteration.

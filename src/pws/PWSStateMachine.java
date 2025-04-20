@@ -7,7 +7,8 @@ import pws.editor.semantics.ExitZone;
 import pws.editor.semantics.Semantics;
 import pws.editor.semantics.SemanticsVisitor;
 import smalgebra.BasicStateProposition;
-
+import smalgebra.SMProposition;
+import smalgebra.TrueProposition;
 import java.awt.*;
 import java.util.HashSet;
 import java.util.List;
@@ -20,12 +21,12 @@ public class PWSStateMachine extends StateMachine {
     private static final long serialVersionUID = 1L;
 
     // Default constructor.
-//    public PWSStateMachine() {
-//        super();
-//        // Automatically instantiate a default assembly.
-//        this.setAssembly(new Assembly("PWSEditorAssembly"));
-//        fixPseudoState();
-//    }
+    // public PWSStateMachine() {
+    //     super();
+    //     // Automatically instantiate a default assembly.
+    //     this.setAssembly(new Assembly("PWSEditorAssembly"));
+    //     fixPseudoState();
+    // }
 
     // Constructor that accepts a name.
     public PWSStateMachine(String name) {
@@ -35,22 +36,22 @@ public class PWSStateMachine extends StateMachine {
         fixPseudoState();
     }
 
-//    // Constructor that accepts a name and an Assembly.
-//    public PWSStateMachine(String name, Assembly assembly) {
-//        super();
-//        this.setName(name);
-//        // Use the provided assembly.
-//        this.setAssembly(assembly);
-//        fixPseudoState();
-//    }
+    // Constructor that accepts a name and an Assembly.
+    // public PWSStateMachine(String name, Assembly assembly) {
+    //     super();
+    //     this.setName(name);
+    //     // Use the provided assembly.
+    //     this.setAssembly(assembly);
+    //     fixPseudoState();
+    // }
 
     // Constructor that accepts an Assembly.
-//    public PWSStateMachine(Assembly assembly) {
-//        super();
-//        // Instantiate with the provided assembly.
-//        this.setAssembly(assembly);
-//        fixPseudoState();
-//    }
+    // public PWSStateMachine(Assembly assembly) {
+    //     super();
+    //     // Instantiate with the provided assembly.
+    //     this.setAssembly(assembly);
+    //     fixPseudoState();
+    // }
 
     // Getter for the assembly.
     public Assembly getAssembly() {
@@ -86,22 +87,25 @@ public class PWSStateMachine extends StateMachine {
      * 4) Update each PWSTransition’s transitionSemantics by computing its pre- and post-conditions.
      */
     public void recalculateSemantics() {
-        // 1) Initialize the pseudostate semantics by calling assembly.calculateInitialStateSemantics().
+        // Initialize pseudostate semantics
         if (pseudoState instanceof PWSState) {
             PWSState pseudo = (PWSState) pseudoState;
             Semantics init = assembly.calculateInitialStateSemantics();
             pseudo.setStateSemantics(init);
         }
 
-        // 2) Compute semantics for each non-pseudostate by folding incoming transitions
-        for (StateInterface s : this.getStates()) {
-            if (s instanceof PWSState && s != this.pseudoState) {
+        // Compute fixed-point semantics for all states via SemanticsVisitor
+        Map<PWSState, Semantics> semMap = SemanticsVisitor.computeAllStateSemantics(this);
+
+        // Assign semantics to non-pseudostates
+        for (StateInterface s : getStates()) {
+            if (s instanceof PWSState && s != pseudoState) {
                 PWSState ps = (PWSState) s;
-                Semantics sem = computeStateSemantics(ps);
-                ps.setStateSemantics(sem);
+                ps.setStateSemantics(semMap.get(ps));
             }
         }
-        // 3) Update each PWSTransition’s transitionSemantics by computing its pre- and post-conditions.
+
+        // Update each PWSTransition’s semantics
         for (TransitionInterface t : transitions) {
             if (t instanceof PWSTransition) {
                 PWSTransition pt = (PWSTransition) t;
@@ -109,53 +113,81 @@ public class PWSStateMachine extends StateMachine {
                 pt.setTransitionSemantics(ts);
             }
         }
+        // Compute and assign reactive exit-zones for each non-pseudostate
+        for (StateInterface si : getStates()) {
+            if (si instanceof PWSState ps && !ps.isPseudoState()) {
+                // Base semantics from stateSemantics
+                Semantics baseSem = ps.getStateSemantics();
+                // Compute exit-zones based on current state semantics
+                HashSet<ExitZone> reactiveZones = computeReactiveSemantics(baseSem);
+                ps.setReactiveSemantics(reactiveZones);
+            }
+        }
     }
 
     public Semantics computeTransitionSemantics(PWSTransition t) {
-        // Recupera lo stato sorgente della transizione
-        PWSState pwsState = (PWSState) t.getSource();
+        if (t.isTriggerable() || ((PWSState) t.getSource()).isPseudoState()) {
+            return computeTriggerableSemantics(t);
+        } else {
+            return computeReactiveSemantics(t);
+        }
+    }
 
-        // determino la precondizione della trasformazione attuata dalla semantica
-        Semantics pre;
-        // Se la transizione è triggerabile OPPURE se lo stato sorgente è un pseudostato,
-        // usa lo stateSemantics; altrimenti (transizione autonoma/reattiva) usa reactiveSemantics.
-        Semantics stateSemantics = pwsState.getStateSemantics();
-        if (t.isTriggerable() || pwsState.isPseudoState()) {
-            // Recupera la semantica della guardia della transizione
-            Semantics guard = t.getGuardProposition().toSemantics(assembly);
-            // Calcola l'intersezione (AND) fra la semantica dello stato sorgente e la guardia.
-            pre = stateSemantics.AND(guard);
-        } else { // Reactive transitions
-            // uso la proposizione base di stato a guardia della transizione (bspGuardTrans);
-            BasicStateProposition bspGuardTrans = (BasicStateProposition) t.getGuardProposition();
-            pre = Semantics.bottom(assembly);
-            // itero sulle EZ associate allo stato
-            for (ExitZone ez : pwsState.getReactiveSemantics()) {
-                // se il target di una EZ coincide con la guardia della transizione
-                if (ez.getTarget().equals(bspGuardTrans)) {
-                    // devo trasformare la semantica dello stato in conseguenza della transizione
-                    Semantics internalTransformation = stateSemantics.transformByMachineTransition(
-                            ez.getStateMachineId(),
-                            ez.getTransition(),
-                            assembly
-                    );
-                    // sommo (OR) le varie trasformazioni interne relative al trigger
-                    pre = pre.OR(internalTransformation);
-                    // break;
-                }
+    /**
+     * Compute semantics for a triggerable or initial transition.
+     */
+    private Semantics computeTriggerableSemantics(PWSTransition t) {
+        // Get the source state for this transition
+        PWSState src = (PWSState) t.getSource();
+        // Retrieve the full semantics of the source state
+        Semantics stateSem = src.getStateSemantics();
+        // Convert the transition's guard proposition into semantics
+        Semantics guardSem = t.getGuardProposition().toSemantics(assembly);
+        // Compute the intersection of stateSem and the guard semantics
+        Semantics result = stateSem.AND(guardSem);
+        // Apply each associated action event to the result
+        for (Action a : t.getActionList()) {
+            // Transform semantics by this machine event
+            result = result.transformByMachineEvent(a.getMachineId(), a.getEvent(), assembly);
+        }
+        // Return the combined semantics for this triggerable transition
+        return result;
+    }
+
+    /**
+     * Compute semantics for a reactive (autonomous) transition.
+     */
+    private Semantics computeReactiveSemantics(PWSTransition t) {
+        // Retrieve the source state of the transition
+        PWSState src = (PWSState) t.getSource();
+        // Get the current full semantics of the source state
+        Semantics stateSem = src.getStateSemantics();
+        // Cast the transition guard to a BasicStateProposition to use as the reactive trigger
+        // Determine the guard proposition for this transition (could be BasicStateProposition or TrueProposition)
+        SMProposition guardProp = t.getGuardProposition();
+        // Initialize accumulator to ⊥ for reactive contributions
+        Semantics result = Semantics.bottom(assembly.getAssemblyId());
+        // Iterate over all exit zones of the source state
+        for (ExitZone ez : src.getReactiveSemantics()) {
+            // Check if this exit zone's target proposition matches the transition guard
+            if (guardProp instanceof TrueProposition
+                    || ez.getTarget().equals(guardProp)) {
+                // Apply the internal machine transition effect on the matching configurations
+                Semantics frag = stateSem.transformByMachineTransition(
+                        ez.getStateMachineId(),
+                        ez.getTransition(),
+                        assembly
+                );
+                // Accumulate this reactive firing into the result
+                result = result.OR(frag);
             }
         }
-
-        // Applica la trasformazione derivante dalle azioni associate alla transizione.
+        // Apply any post-actions associated with the transition
         for (Action a : t.getActionList()) {
-            pre = pre.transformByMachineEvent(
-                    a.getMachineId(),
-                    a.getEvent(),
-                    assembly
-            );
+            result = result.transformByMachineEvent(a.getMachineId(), a.getEvent(), assembly);
         }
-
-        return pre;
+        // Return the combined reactive semantics for this transition
+        return result;
     }
 
     public Semantics computeStateSemantics(PWSState s) {
@@ -179,7 +211,6 @@ public class PWSStateMachine extends StateMachine {
         s.setReactiveSemantics(reactiveSem);
         // Per quanto riguarda le constraints, potremmo aggiungere una logica simile in futuro.
 
-//
         return orSem;
     }
 

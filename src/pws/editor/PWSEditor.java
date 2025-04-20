@@ -9,6 +9,10 @@ import pws.PWSState;
 import pws.PWSStateMachine;
 import serializer.BinaryModelSerializer;
 import utility.SVGExporter;
+import java.util.logging.Logger;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.SimpleFormatter;
 
 import javax.swing.*;
 import java.awt.*;
@@ -275,6 +279,17 @@ public class PWSEditor extends JFrame {
     }
 
     public static void main(String[] args) {
+        // Simplify logs: only show the message text
+        System.setProperty("java.util.logging.SimpleFormatter.format", "%5$s%n");
+        Logger rootLogger = Logger.getLogger("");
+        for (Handler handler : rootLogger.getHandlers()) {
+            handler.setFormatter(new SimpleFormatter() {
+                @Override
+                public String format(LogRecord record) {
+                    return record.getMessage() + System.lineSeparator();
+                }
+            });
+        }
         PWSStateMachine pwsStateMachine = new PWSStateMachine("W");
 
         // Here I create a state machine for adding to the assembly with id "m1"
